@@ -17,7 +17,11 @@
   (e/client
     (binding [dom/node js/document.body]
       (dom/p (dom/text "discord"))
-      (let [])
-      (e/for-by identity [line (e/server (e/watch d/log))]
-                (dom/pre (dom/text (e/server (pprint-to-str line)))
-                         (dom/props {:style {:background-color (if (= 'recvd (first line)) "pink")}}))))))
+      (dom/table
+       
+       (dom/tbody
+        (e/for-by identity [message (e/server (e/watch d/messages))]
+                  (dom/tr
+                   (dom/style {:background "pink"})
+                   (dom/td (dom/pre (dom/text (:username (:author message)))))
+                   (dom/td (dom/pre (dom/text (:content message)))))))))))

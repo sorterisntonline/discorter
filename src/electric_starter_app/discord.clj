@@ -2,7 +2,9 @@
   (:require
    [clojure.edn :as edn]
    [clojure.core.async :as a]
-   [clojure.data.json :as json])
+   [clojure.data.json :as json]
+   [hato.client :as hc]
+   )
   (:import [org.eclipse.jetty.websocket.client WebSocketClient]
            [org.eclipse.jetty.websocket.api Session WebSocketAdapter]
            [java.net URI]))
@@ -15,11 +17,13 @@
 (def last-sequence-number (atom nil))
 (def heartbeater (atom nil))
 (def resume-url (atom nil))
-(def log (atom []))
+(def session-id (atom nil))
+
+(def messages (atom []))
+(reset! messages [])
 
 (defn send-data [d]
-  (swap! log conj ['sent message])
-  
+  (println (str "sent data:" d))
   (.. @session (getRemote) (sendString (json/write-str d))))
 
 (defn send-heartbeat []
@@ -34,21 +38,42 @@ d = data
 s = sequence number
 "
 
-(defn respond-hello [message]
-  (def message message)
-  (Thread/sleep 100)
+(defn respond-hello [time]
+  (println "time" time)
   (when-not @heartbeater
-    (reset! heartbeater (future (loop [] (Thread/sleep (-> message :d :heartbeat_interval))
-                                      (when (.isOpen @session)
-                                        (send-heartbeat)
-                                        (recur))))))
-  (Thread/sleep 100)
+    (reset! heartbeater (future (loop [] (Thread/sleep (or 5000 time))
+                                      (if (.isOpen @session)
+                                        (do (send-heartbeat)
+                                            (recur))
+                                        (println "heartbeater dying"))))))
+  
+  (if (and @resume-url @last-sequence-number @session-id)
+    (do
+      (println "resuming")
+      (send-data {:op 6 :d {:token TOKEN :session_id @session-id :seq @last-sequence-number}}))
+    (do
+      (println "starting new connection")
+      (send-heartbeat)
+      (Thread/sleep 100)
+      (send-data {:op 2 :d {:token TOKEN
+                            :intents 32265
+                            :properties {:os "linux"
+                                         :browser "sorter"
+                                         :device "jvm"}
+                            :presence {:status "online"
+                                       :activities []
+                                       :afk false}}}))))
 
-  (send-data {:op 2 :d {:token TOKEN
-                        :intents 8
-                        :properties {:os "linux"
-                                     :browser "sorter"
-                                     :device "jvm"}}}))
+(defn handle-event [message]
+  (def message message)
+  (case (:t message)
+    "GUILD_CREATE" :nothing
+    "READY" (do
+              (reset! session-id (:session_id (:d message)))
+              (reset! resume-url (:resume_gateway_url (:d message))))
+    "MESSAGE_CREATE" (do
+                       (swap! messages conj (:d message)))
+    :nothing))
 
 (defn create-socket []
   (proxy [WebSocketAdapter] []
@@ -58,15 +83,15 @@ s = sequence number
     (onWebSocketText [^String message]
       (let [message (json/read-str message {:key-fn keyword})]
         (prn "Received message:" message)
-        (reset! last-sequence-number (:s message))
-        (def message
-          message)
-        (swap! log conj ['recvd message])
-        (prn (case (:op message)
-               10 (respond-hello message)
-               11 :nothing
-               0 (reset! resume-url (:resume_gateway_url (:d message)))
-               :nothing))))
+        
+        (when (:s message) (reset! last-sequence-number (:s message)))
+        
+        (case (:op message)
+          10 (respond-hello (:heartbeat_interval (:d message)))
+          11 :nothing
+          0 (prn (handle-event message))
+          
+          :nothing)))
     
     (onWebSocketClose [statusCode reason]
       (println "WebSocket Closed. Status:" statusCode "Reason:" reason))
@@ -74,8 +99,10 @@ s = sequence number
     (onWebSocketError [^Throwable cause]
       (println "WebSocket Error:" (.getMessage cause)))))
 
-(defn connect-websocket [url]
-  (let [client (WebSocketClient.)
+(defn connect-websocket []
+  (let [url (or @resume-url
+                "wss://gateway.discord.gg")
+        client (WebSocketClient.)
         socket (create-socket)]
     
     (.start client)
@@ -87,10 +114,9 @@ s = sequence number
   (.close @session)
   (future-cancel @heartbeater))
 
+
 ;; Usage
 (comment
-  (connect-websocket "wss://gateway.discord.gg")
+  (connect-websocket)
 
-  (.close @session)
-  
-  org.eclipse.jetty.websocket.common.WebSocketSession)
+  (close))
