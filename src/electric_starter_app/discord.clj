@@ -15,8 +15,11 @@
 (def last-sequence-number (atom nil))
 (def heartbeater (atom nil))
 (def resume-url (atom nil))
+(def log (atom []))
 
 (defn send-data [d]
+  (swap! log conj ['sent message])
+  
   (.. @session (getRemote) (sendString (json/write-str d))))
 
 (defn send-heartbeat []
@@ -58,6 +61,7 @@ s = sequence number
         (reset! last-sequence-number (:s message))
         (def message
           message)
+        (swap! log conj ['recvd message])
         (prn (case (:op message)
                10 (respond-hello message)
                11 :nothing
