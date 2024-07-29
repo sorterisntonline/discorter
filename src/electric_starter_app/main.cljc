@@ -15,13 +15,12 @@
 
 (e/defn Main [ring-request]
   (e/client
-    (binding [dom/node js/document.body]
-      (dom/p (dom/text "discord"))
-      (dom/table
-       
-       (dom/tbody
-        (e/for-by identity [message (e/server (e/watch d/messages))]
-                  (dom/tr
-                   (dom/style {:background "pink"})
-                   (dom/td (dom/pre (dom/text (:username (:author message)))))
-                   (dom/td (dom/pre (dom/text (:content message)))))))))))
+   (binding [dom/node js/document.body]
+     (dom/p (dom/text "discord"))
+     (dom/table
+      (dom/tbody
+       (e/for-by identity [message (e/server (e/watch d/messages))]
+                 (dom/tr
+                  (dom/style {:background "pink"})
+                  (dom/td (dom/pre (dom/text (e/server (pprint-to-str message)))))
+                  (dom/td (dom/pre (dom/text (:content message)))))))))))

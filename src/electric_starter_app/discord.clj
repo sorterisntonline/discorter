@@ -3,8 +3,8 @@
    [clojure.edn :as edn]
    [clojure.core.async :as a]
    [clojure.data.json :as json]
-   [hato.client :as hc]
-   )
+   [hato.client :as hc])
+  
   (:import [org.eclipse.jetty.websocket.client WebSocketClient]
            [org.eclipse.jetty.websocket.api Session WebSocketAdapter]
            [java.net URI]))
@@ -64,6 +64,33 @@ s = sequence number
                                        :activities []
                                        :afk false}}}))))
 
+"ux: any channel can be sorted, any message with a react is added to that channels sort
+
+register react as sorter react, when used, bot responds with message
+
+"
+
+(defn is-emoji? [st] (re-matches #"<:[a-zA-Z0-9_]+:[0-9]+>" st))
+
+(defn http-interaction [interaction text]
+  (hc/post (str "https://discord.com/api/v10/interactions/"
+                (:id interaction) "/" (:token interaction) "/callback")
+           {:headers {"Content-type" "application/json"}
+            :body (json/write-str
+                   {:type 4
+                    :data {:content text}})}))
+
+(defn respond-interaction [interaction]
+  (def interaction interaction)
+  (cond
+    (= (:type interaction) 2)
+    
+    (if (is-emoji? (-> interaction :data :options first :value))
+      (http-interaction interaction (str "react " (-> interaction :data :options first :value) "to any message to add it to sorter"))
+      (http-interaction interaction "invalid emoji, try a custom server emoji"))
+    
+    true :nothing))
+
 (defn handle-event [message]
   (def message message)
   (case (:t message)
@@ -73,7 +100,9 @@ s = sequence number
               (reset! resume-url (:resume_gateway_url (:d message))))
     "MESSAGE_CREATE" (do
                        (swap! messages conj (:d message)))
+    "INTERACTION_CREATE" (respond-interaction (:d message))
     :nothing))
+
 
 (defn create-socket []
   (proxy [WebSocketAdapter] []
@@ -113,6 +142,19 @@ s = sequence number
 (defn close []
   (.close @session)
   (future-cancel @heartbeater))
+
+(defn start []
+  (hc/post (str "https://discord.com/api/v10/applications/" APP-ID "/commands")
+           {:headers {"Content-type" "application/json"
+                      "Authorization" (str "Bot " TOKEN) }
+            :body (json/write-str
+                   {:name "register_emoji"
+                    :type 1
+                    :description "which emoji should be used to mark items to be sorted"
+                    :options [{:type 3
+                               :name "emoji"
+                               :description "which emoji should be used to add message to sorter"}]})})
+  (connect-websocket))
 
 
 ;; Usage
